@@ -1,13 +1,50 @@
 from __future__ import annotations
 
+import os
+import site
+import sys
+from dataclasses import dataclass
 from pathlib import Path
-
-from faster_whisper import WhisperModel
 
 from app import config
 
 
-ALLOWED_MODELS = {"tiny.en", "base.en", "small.en", "medium.en"}
+ALLOWED_MODELS = {"tiny.en", "base.en", "small.en", "medium.en", "large-v3-turbo"}
+_DLL_DIRECTORY_HANDLES = []
+
+
+def _add_nvidia_dll_directories() -> None:
+    """Make pip-installed NVIDIA CUDA DLLs visible to CTranslate2 on Windows."""
+    if sys.platform != "win32" or not hasattr(os, "add_dll_directory"):
+        return
+
+    candidates: list[Path] = []
+    for site_path in site.getsitepackages():
+        nvidia_root = Path(site_path) / "nvidia"
+        if nvidia_root.exists():
+            candidates.extend(nvidia_root.glob("*\\bin"))
+
+    existing_path = os.environ.get("PATH", "")
+    bin_paths: list[str] = []
+    for path in candidates:
+        if path.exists():
+            bin_paths.append(str(path))
+            _DLL_DIRECTORY_HANDLES.append(os.add_dll_directory(str(path)))
+
+    if bin_paths:
+        os.environ["PATH"] = os.pathsep.join(bin_paths + [existing_path])
+
+
+_add_nvidia_dll_directories()
+
+from faster_whisper import WhisperModel
+
+
+@dataclass
+class TranscriptSegment:
+    start: float
+    end: float
+    text: str
 
 
 class LocalWhisperTranscriber:
@@ -30,7 +67,7 @@ class LocalWhisperTranscriber:
         self.beam_size = beam_size
         self.model = WhisperModel(model_name, device=device, compute_type=compute_type)
 
-    def transcribe_file(self, wav_path: str | Path) -> str:
+    def transcribe_segments(self, wav_path: str | Path) -> list[TranscriptSegment]:
         path = Path(wav_path)
         if not path.exists():
             raise FileNotFoundError(f"Audio file not found: {path}")
@@ -40,6 +77,16 @@ class LocalWhisperTranscriber:
             language="en",
             beam_size=self.beam_size,
             vad_filter=True,
+            condition_on_previous_text=False,
+            temperature=0,
         )
-        text = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
+        return [
+            TranscriptSegment(start=segment.start, end=segment.end, text=segment.text.strip())
+            for segment in segments
+            if segment.text.strip()
+        ]
+
+    def transcribe_file(self, wav_path: str | Path) -> str:
+        segments = self.transcribe_segments(wav_path)
+        text = " ".join(segment.text for segment in segments)
         return " ".join(text.split())

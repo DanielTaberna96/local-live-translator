@@ -92,30 +92,30 @@ def capture_to_wav(
     device = select_loopback_device(device_index)
     source_rate = int(device.get("defaultSampleRate") or sample_rate)
     channels = int(device.get("maxInputChannels") or 2)
-    frames_per_buffer = 1024
+    frames_per_buffer = 512
 
     with pyaudio.PyAudio() as audio:
-        stream = audio.open(
-            format=pyaudio.paInt16,
-            channels=channels,
-            rate=source_rate,
-            input=True,
-            input_device_index=int(device["index"]),
-            frames_per_buffer=frames_per_buffer,
-        )
-        frames: list[bytes] = []
-        deadline = time.monotonic() + float(seconds)
-        try:
-            while time.monotonic() < deadline:
-                frames.append(stream.read(frames_per_buffer, exception_on_overflow=False))
-        finally:
-            stream.stop_stream()
-            stream.close()
+        with wave.open(str(output), "wb") as wav_file:
+            wav_file.setnchannels(channels)
+            wav_file.setsampwidth(pyaudio.get_sample_size(pyaudio.paInt16))
+            wav_file.setframerate(source_rate)
 
-    with wave.open(str(output), "wb") as wav_file:
-        wav_file.setnchannels(channels)
-        wav_file.setsampwidth(config.SAMPLE_WIDTH_BYTES)
-        wav_file.setframerate(source_rate)
-        wav_file.writeframes(b"".join(frames))
+            def callback(in_data, frame_count, time_info, status):
+                wav_file.writeframes(in_data)
+                return (in_data, pyaudio.paContinue)
+
+            with audio.open(
+                format=pyaudio.paInt16,
+                channels=channels,
+                rate=source_rate,
+                input=True,
+                input_device_index=int(device["index"]),
+                frames_per_buffer=frames_per_buffer,
+                stream_callback=callback,
+            ) as stream:
+                stream.start_stream()
+                deadline = time.monotonic() + float(seconds)
+                while stream.is_active() and time.monotonic() < deadline:
+                    time.sleep(0.05)
 
     return output

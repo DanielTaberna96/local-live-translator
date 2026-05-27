@@ -1,33 +1,80 @@
-# Local Live Translator EN -> ES
+# Local Live Translator
 
-MVP local para Windows 10/11 que captura audio de salida del sistema con WASAPI loopback, transcribe ingles con `faster-whisper` y traduce offline a espanol con Argos Translate.
+Offline Windows live translator for English audio to Spanish text.
 
-No usa APIs externas para transcribir ni traducir. Argos solo necesita internet la primera vez para descargar el paquete `en -> es`; despues la traduccion funciona offline.
+It captures system output audio through WASAPI loopback, transcribes locally with `faster-whisper`, and translates offline with MarianMT (`Helsinki-NLP/opus-mt-en-es`) by default. Argos Translate is available as a lighter fallback. No cloud APIs are used for transcription or translation.
 
-## Estado actual
+## Features
 
-Implementadas las fases de consola:
+- Windows system-audio capture through WASAPI loopback.
+- Local Whisper transcription with `faster-whisper`.
+- GPU mode with CUDA + `float16`.
+- Offline EN -> ES translation with MarianMT (`Helsinki-NLP/opus-mt-en-es`) by default.
+- Optional Argos Translate backend.
+- Always-on-top Tkinter UI.
+- Whisper model and translation backend selector.
+- Markdown transcript saved per session.
+- PyInstaller Windows build.
 
-- Fase 1: listado de dispositivos y captura WASAPI loopback a WAV.
-- Fase 2: transcripcion local con `faster-whisper`.
-- Fase 3: traduccion offline con Argos Translate.
-- Fase 4: pipeline continuo por consola.
+## Tested Environment
 
-La UI tkinter esta intencionalmente bloqueada hasta validar:
-
-1. `output/test_capture.wav` contiene audio real del sistema.
-2. `scripts/test_transcribe_file.py` transcribe ese audio en ingles.
-3. `app/translator.py` traduce ingles -> espanol offline.
-
-## Requisitos
+This MVP was built and tested on:
 
 - Windows 10/11.
-- Python 3.10 o 3.11.
-- Audio reproduciendose por el dispositivo de salida que se quiere capturar.
+- Python 3.11.
+- NVIDIA GeForce RTX 3080.
+- NVIDIA driver with CUDA runtime available.
+- `faster-whisper` using CUDA + `float16`.
+- WASAPI loopback via PyAudioWPatch.
+- Whisper model: `medium.en`.
+- MarianMT model: `Helsinki-NLP/opus-mt-en-es`.
 
-## Instalacion
+Other GPUs or CPU-only setups may require changing `app/config.py`.
 
-Desde `E:\OneDrive\Documentos\APPs\local-live-translator`:
+## Current Stable Profile
+
+```python
+CHUNK_SECONDS = 3
+WHISPER_MODEL = "medium.en"
+WHISPER_DEVICE = "cuda"
+WHISPER_COMPUTE_TYPE = "float16"
+WHISPER_BEAM_SIZE = 1
+TRANSLATION_BACKEND = "marian"
+MARIAN_DEVICE = "cuda"
+ENABLE_SLIDING_WINDOW = False
+ENABLE_SENTENCE_BUFFER = False
+```
+
+## Using the Packaged App
+
+Use the whole `dist/LocalLiveTranslator/` folder. Do not move only the `.exe`; it depends on files inside `_internal/`.
+
+Run:
+
+```powershell
+dist\LocalLiveTranslator\LocalLiveTranslator.exe
+```
+
+In the app:
+
+1. Play English audio through the Windows output device you want to capture.
+2. Choose model `medium.en`.
+3. Choose backend `marian`.
+4. Press `Start`.
+5. Read the English transcription and Spanish translation in the window.
+6. Use `Open Transcripts` to open saved Markdown transcripts.
+
+Transcripts are saved in:
+
+```text
+output/transcripts/
+```
+
+The first run may require internet if the Whisper or MarianMT models are not already cached on the machine. After models are installed/cached, runtime transcription and translation are local.
+
+## Running from Source
+
+From the repo root:
 
 ```powershell
 py -3.11 -m venv .venv
@@ -36,162 +83,146 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Si usas Python 3.10:
+Install or verify Argos EN -> ES package if you want the Argos fallback:
 
 ```powershell
-py -3.10 -m venv .venv
+python scripts\install_argos_en_es.py
 ```
 
-## Fase 1: audio del sistema
-
-Listar dispositivos:
+List audio devices and confirm a `LOOPBACK` device exists:
 
 ```powershell
-python scripts/list_audio_devices.py
+python scripts\list_audio_devices.py
 ```
 
-Grabar 10 segundos de audio del sistema:
+Capture a test WAV:
 
 ```powershell
-python scripts/test_capture_to_wav.py
+python scripts\test_capture_to_wav.py
 ```
 
-Salida esperada:
+Validate transcription:
+
+```powershell
+python scripts\test_transcribe_file.py output\test_capture.wav --model medium.en --device cuda --compute-type float16 --beam-size 1
+```
+
+Run the UI:
+
+```powershell
+python -m app.ui
+```
+
+Run the console pipeline:
+
+```powershell
+python -m app.pipeline --translation-backend marian
+```
+
+## Configuration
+
+Edit `app/config.py`:
+
+- `CHUNK_SECONDS`: audio chunk size.
+- `AUDIO_DEVICE_INDEX`: loopback device index; `None` auto-selects a loopback output.
+- `WHISPER_MODEL`: `tiny.en`, `base.en`, `small.en`, `medium.en`, `large-v3-turbo`.
+- `WHISPER_DEVICE`: `cpu` or `cuda`.
+- `WHISPER_COMPUTE_TYPE`: `int8` for CPU, `float16` for CUDA.
+- `WHISPER_BEAM_SIZE`: `1` prioritizes latency.
+- `TRANSLATION_BACKEND`: `marian` or `argos`.
+- `MARIAN_DEVICE`: `cpu` or `cuda`.
+- `MAX_AUDIO_QUEUE_CHUNKS`: backlog limit before old audio is dropped.
+- `UI_HISTORY_LINES`: visible history size.
+- `SAVE_TRANSCRIPT`: save Markdown transcript per session.
+
+Experimental options:
+
+- `ENABLE_SLIDING_WINDOW`: tested, currently disabled by default because it introduced duplicate/hallucinated text.
+- `ENABLE_SENTENCE_BUFFER`: tested, currently disabled by default because it adds latency.
+- `ENABLE_GLOSSARY`: optional post-translation replacements.
+
+## Packaging
+
+The recommended build is `onedir`, not `onefile`, because CUDA, Torch, Transformers, and native DLLs make `onefile` slow and harder to debug.
+
+Install PyInstaller:
+
+```powershell
+pip install pyinstaller
+```
+
+Build:
+
+```powershell
+pyinstaller --noconfirm --clean --windowed --name LocalLiveTranslator `
+  --collect-all argostranslate `
+  --collect-all transformers `
+  --collect-all tokenizers `
+  --collect-all sentencepiece `
+  --collect-all sacremoses `
+  --collect-all stanza `
+  --collect-all ctranslate2 `
+  --collect-all faster_whisper `
+  --collect-all nvidia `
+  main.py
+```
+
+Output:
 
 ```text
-output/test_capture.wav
+dist/LocalLiveTranslator/LocalLiveTranslator.exe
 ```
 
-El script selecciona un dispositivo `LOOPBACK` por defecto. Si se pasa `--device-index`, ese dispositivo debe ser loopback; el codigo rechaza microfonos o entradas normales.
+The build can be several GB.
 
-Ejemplo con indice explicito:
+## Limitations
 
-```powershell
-python scripts/test_capture_to_wav.py --device-index 12 --seconds 10
-```
-
-## Fase 2: transcripcion local
-
-Transcribir el WAV capturado:
-
-```powershell
-python scripts/test_transcribe_file.py output/test_capture.wav
-```
-
-Modelo por defecto:
-
-```text
-small.en
-```
-
-Modelos permitidos:
-
-```text
-tiny.en, base.en, small.en, medium.en
-```
-
-CPU por defecto:
-
-```powershell
-python scripts/test_transcribe_file.py output/test_capture.wav --device cpu --compute-type int8
-```
-
-GPU NVIDIA compatible:
-
-```powershell
-python scripts/test_transcribe_file.py output/test_capture.wav --device cuda --compute-type float16
-```
-
-## Fase 3: Argos Translate offline
-
-Instalar o verificar el paquete English -> Spanish:
-
-```powershell
-python scripts/install_argos_en_es.py
-```
-
-Este paso puede requerir internet. Una vez instalado, la traduccion en runtime usa el paquete local.
-
-## Fase 4: pipeline por consola
-
-Ejecutar captura, transcripcion y traduccion en loop:
-
-```powershell
-python -m app.pipeline
-```
-
-Opciones utiles:
-
-```powershell
-python -m app.pipeline --chunk-seconds 4 --model small.en --device cpu --compute-type int8
-python -m app.pipeline --chunk-seconds 3 --model base.en --audio-device-index 12
-```
-
-Salida esperada:
-
-```text
-EN: transcribed English text
-ES: texto traducido al espanol
-```
-
-El pipeline evita imprimir traducciones identicas consecutivas.
-
-## Configuracion
-
-Editar `app/config.py`:
-
-- `CHUNK_SECONDS`: tamano de chunk para el pipeline.
-- `AUDIO_DEVICE_INDEX`: `None` para autoseleccion loopback o indice explicito.
-- `WHISPER_MODEL`: `tiny.en`, `base.en`, `small.en`, `medium.en`.
-- `WHISPER_DEVICE`: `cpu` o `cuda`.
-- `WHISPER_COMPUTE_TYPE`: `int8` para CPU, `float16` para CUDA compatible.
+- This is chunk-based live translation, not true word-by-word streaming ASR.
+- Accuracy depends heavily on source audio quality and speaker clarity.
+- Proper nouns, company names, and product names may be misrecognized.
+- Short chunks can cut phrases; longer chunks add latency.
+- First setup may require internet to download models/packages.
+- Packaged builds are large due to native ML dependencies.
 
 ## Troubleshooting
 
-### 1. Solo aparece microfono y no loopback
+### Only microphones appear, no loopback
 
-- Ejecutar `python scripts/list_audio_devices.py`.
-- Confirmar que Windows tiene un dispositivo de salida activo.
-- Reproducir audio antes de correr la captura.
-- Revisar que `PyAudioWPatch` este instalado dentro del venv activo.
-- Si no hay ningun dispositivo `LOOPBACK`, no fuerces un microfono: el MVP requiere WASAPI loopback.
-
-### 2. No se escucha audio en el WAV
-
-- Verificar que haya audio reproduciendose durante los 10 segundos.
-- Probar otro dispositivo marcado `LOOPBACK` con `--device-index`.
-- Confirmar que el audio sale por ese dispositivo y no por HDMI/Bluetooth distinto.
-- Abrir `output/test_capture.wav` en un reproductor o editor de audio y revisar forma de onda.
-
-### 3. faster-whisper no detecta GPU
-
-- Probar primero CPU:
+Run:
 
 ```powershell
-python scripts/test_transcribe_file.py output/test_capture.wav --device cpu --compute-type int8
+python scripts\list_audio_devices.py
 ```
 
-- Para CUDA, confirmar drivers NVIDIA y runtime compatible con CTranslate2.
-- Si `--device cuda --compute-type float16` falla, no es un error del pipeline: es entorno GPU/CUDA.
+Confirm Windows has an active output device and audio is playing. Do not force a microphone device; the app is designed for WASAPI loopback.
 
-### 4. Argos no tiene instalado el paquete en-es
+### WAV has no audio
 
-Ejecutar:
+- Make sure audio is playing during capture.
+- Try another device marked `LOOPBACK`.
+- Confirm Windows output is not going to another HDMI/Bluetooth device.
+
+### CUDA fails
+
+Try CPU first:
 
 ```powershell
-python scripts/install_argos_en_es.py
+python scripts\test_transcribe_file.py output\test_capture.wav --device cpu --compute-type int8
 ```
 
-Si el equipo debe quedar offline, hacer este paso una vez con internet y luego volver a probar sin red.
+If CUDA says `cublas64_12.dll is not found`, reinstall:
 
-### 5. Latencia alta
+```powershell
+pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12
+```
 
-- Reducir `CHUNK_SECONDS` de 4 a 3.
-- Usar `base.en` o `tiny.en`.
-- En CPU mantener `compute_type=int8`.
-- Evitar `medium.en` salvo que la precision sea mas importante que la latencia.
-- Cerrar apps que consuman CPU/GPU.
+### MarianMT is not downloaded
 
-## UI
+Run the app once with internet or execute a small translation test. The model is cached locally by Hugging Face.
 
-`app/ui.py` existe solo como bloqueo explicito. No se debe implementar ni usar hasta que las tres validaciones de consola pasen.
+### Latency is high
+
+- Use `medium.en` or `small.en`, not `large-v3-turbo`.
+- Keep `WHISPER_BEAM_SIZE = 1`.
+- Keep `CHUNK_SECONDS = 3` for the best tested balance.
+- Close other GPU-heavy apps.

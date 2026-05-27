@@ -15,6 +15,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", choices=sorted(ALLOWED_MODELS), default=config.WHISPER_MODEL)
     parser.add_argument("--device", choices=["cpu", "cuda"], default=config.WHISPER_DEVICE)
     parser.add_argument("--compute-type", default=config.WHISPER_COMPUTE_TYPE)
+    parser.add_argument("--beam-size", type=int, default=config.WHISPER_BEAM_SIZE)
     return parser.parse_args()
 
 
@@ -24,6 +25,7 @@ def main() -> None:
         model_name=args.model,
         device=args.device,
         compute_type=args.compute_type,
+        beam_size=args.beam_size,
     )
     text = transcriber.transcribe_file(args.wav_path)
     print(text or "[no speech detected]")

@@ -4,7 +4,13 @@ __pycache__/
 
 output/*.wav
 output/*.tmp
+output/transcripts/
 
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+build/
+dist/
+release/
+*.spec
