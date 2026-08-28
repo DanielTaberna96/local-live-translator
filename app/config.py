@@ -12,7 +12,7 @@ SAMPLE_RATE = 16000
 SAMPLE_WIDTH_BYTES = 2
 
 # None means: auto-select the default WASAPI loopback output device.
-AUDIO_DEVICE_INDEX = 28
+AUDIO_DEVICE_INDEX = None
 
 # faster-whisper settings.
 WHISPER_MODEL = "medium.en"

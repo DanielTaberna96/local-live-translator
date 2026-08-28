@@ -35,6 +35,7 @@ Other GPUs or CPU-only setups may require changing `app/config.py`.
 
 ```python
 CHUNK_SECONDS = 3
+AUDIO_DEVICE_INDEX = None
 WHISPER_MODEL = "medium.en"
 WHISPER_DEVICE = "cuda"
 WHISPER_COMPUTE_TYPE = "float16"
